@@ -126,7 +126,7 @@ impl Deref for BStr {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        &self.0
+        self.deref_const()
     }
 }
 

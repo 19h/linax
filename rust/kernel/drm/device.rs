@@ -91,17 +91,39 @@ impl<T: drm::drv::Driver> Device<T> {
     const GEM_FOPS: bindings::file_operations = drm::gem::create_fops();
 
     /// Create a new `drm::device::Device` for a `drm::drv::Driver`.
-    pub fn new(dev: &device::Device, data: T::Data) -> Result<ARef<Self>> {
+    fn create_drm_device(dev: &device::Device) -> Result<ARef<Self>> {
         // SAFETY: `dev` is valid by its type invarants; `VTABLE`, as a `const` is pinned to the
         // read-only section of the compilation.
         let raw_drm = unsafe { bindings::drm_dev_alloc(&Self::VTABLE, dev.as_raw()) };
         let raw_drm = NonNull::new(from_err_ptr(raw_drm)? as *mut _).ok_or(ENOMEM)?;
 
-        let data_ptr = <T::Data as ForeignOwnable>::into_foreign(data);
-
         // SAFETY: The reference count is one, and now we take ownership of that reference as a
         // drm::device::Device.
         let drm = unsafe { ARef::<Self>::from_raw(raw_drm) };
+
+        Ok(drm)
+    }
+
+    /// Create a new `drm::device::Device` for a `drm::drv::Driver`.
+    pub fn new(dev: &device::Device, data: T::Data) -> Result<ARef<Self>> {
+        let drm = Self::create_drm_device(dev)?;
+
+        let data_ptr = <T::Data as ForeignOwnable>::into_foreign(data);
+
+        // SAFETY: Safe as we set `dev_private` once at device creation.
+        unsafe { drm.set_raw_data(data_ptr) };
+
+        Ok(drm)
+    }
+
+    pub fn new_from_closure<F>(dev: &device::Device, data: F) -> Result<ARef<Self>>
+    where
+        F: FnOnce(ARef<Self>) -> Result<T::Data>,
+    {
+        let drm = Self::create_drm_device(dev)?;
+        let data = data(drm.clone())?;
+
+        let data_ptr = <T::Data as ForeignOwnable>::into_foreign(data);
 
         // SAFETY: Safe as we set `dev_private` once at device creation.
         unsafe { drm.set_raw_data(data_ptr) };

@@ -131,6 +131,10 @@ impl<T: drm::drv::Driver> Device<T> {
         Ok(drm)
     }
 
+    pub fn device(&self) -> &Self {
+        &self
+    }
+
     pub(crate) fn as_raw(&self) -> *mut bindings::drm_device {
         self.0.get()
     }

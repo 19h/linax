@@ -28,7 +28,9 @@ pub(crate) struct AsahiData {
     pub(crate) resources: regs::Resources,
 }
 
-pub(crate) struct AsahiDriver(ARef<AsahiDevice>);
+pub(crate) struct AsahiDriver {
+    _dev: ARef<AsahiDevice>,
+}
 
 /// Convenience type alias for the DRM device type for this driver.
 pub(crate) type AsahiDevice = kernel::drm::device::Device<AsahiDriver>;
@@ -201,6 +203,6 @@ impl platform::Driver for AsahiDriver {
 
         drm::drv::Registration::new_foreign_owned(drm.clone(), 0)?;
 
-        Ok(KBox::new(Self(drm), GFP_KERNEL)?.into())
+        Ok(KBox::new(Self { _dev: drm }, GFP_KERNEL)?.into())
     }
 }

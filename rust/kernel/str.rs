@@ -1019,7 +1019,7 @@ pub mod parse_int {
     /// assert_eq!(Ok(255), u8::from_str(b_str!("255")));
     /// assert!(u8::from_str(b_str!("256")).is_err());
     /// ```
-    pub trait ParseInt: FromStrRadix + TryFrom<i128> {
+    pub trait ParseInt: FromStrRadix + TryFrom<i64> {
         /// Parse a string according to the description in [`Self`].
         fn from_str(src: &BStr) -> Result<Self> {
             match src.deref() {
@@ -1029,7 +1029,7 @@ pub mod parse_int {
                     // So if we want to parse negative numbers as positive and
                     // later multiply by -1, we have to parse into a larger
                     // integer. We choose i128 as sufficiently large.
-                    let val = i128::from_str_radix(
+                    let val = i64::from_str_radix(
                         core::str::from_utf8(digits).map_err(|_| EINVAL)?,
                         radix,
                     )

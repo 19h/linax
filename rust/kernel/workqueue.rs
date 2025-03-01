@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
+// FIXME
+#![allow(clippy::undocumented_unsafe_blocks)]
 
 //! Work queues.
 //!
@@ -69,6 +71,7 @@
 //! fn print_later(val: Arc<MyStruct>) {
 //!     let _ = workqueue::system().enqueue(val);
 //! }
+//! # print_later(MyStruct::new(42).unwrap());
 //! ```
 //!
 //! The following example shows how multiple `work_struct` fields can be used:
@@ -126,6 +129,8 @@
 //! fn print_2_later(val: Arc<MyStruct>) {
 //!     let _ = workqueue::system().enqueue::<Arc<MyStruct>, 2>(val);
 //! }
+//! # print_1_later(MyStruct::new(24, 25).unwrap());
+//! # print_2_later(MyStruct::new(41, 42).unwrap());
 //! ```
 //!
 //! C header: [`include/linux/workqueue.h`](srctree/include/linux/workqueue.h)
@@ -366,7 +371,7 @@ unsafe impl<T: ?Sized, const ID: u64> Sync for Work<T, ID> {}
 impl<T: ?Sized, const ID: u64> Work<T, ID> {
     /// Creates a new instance of [`Work`].
     #[inline]
-    pub fn new(name: &'static CStr, key: &'static LockClassKey) -> impl PinInit<Self>
+    pub fn new(name: &'static CStr, key: LockClassKey) -> impl PinInit<Self>
     where
         T: WorkItem<ID>,
     {

@@ -13,11 +13,24 @@
 
 #![no_std]
 #![feature(arbitrary_self_types)]
-#![feature(coerce_unsized)]
-#![feature(dispatch_from_dyn)]
+#![feature(associated_type_defaults)]
+#![cfg_attr(CONFIG_RUSTC_HAS_COERCE_POINTEE, feature(derive_coerce_pointee))]
+#![cfg_attr(CONFIG_RUSTC_HAS_COERCE_POINTEE, feature(pin_coerce_unsized_trait))]
+#![cfg_attr(not(CONFIG_RUSTC_HAS_COERCE_POINTEE), feature(coerce_unsized))]
+#![cfg_attr(not(CONFIG_RUSTC_HAS_COERCE_POINTEE), feature(dispatch_from_dyn))]
+#![cfg_attr(not(CONFIG_RUSTC_HAS_COERCE_POINTEE), feature(unsize))]
+#![feature(duration_constants)]
 #![feature(inline_const)]
 #![feature(lint_reasons)]
-#![feature(unsize)]
+#![feature(ptr_sub_ptr)]
+#![feature(sized_type_properties)]
+#![feature(slice_range)]
+// Stable in Rust 1.83
+#![feature(const_maybe_uninit_as_mut_ptr)]
+#![feature(const_mut_refs)]
+#![feature(const_ptr_write)]
+#![feature(const_refs_to_cell)]
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 // Ensure conditional compilation based on the kernel configuration works;
 // otherwise we may silently break things like initcall handling.
@@ -29,33 +42,49 @@ extern crate self as kernel;
 
 pub use ffi;
 
+pub mod addr;
 pub mod alloc;
 #[cfg(CONFIG_BLOCK)]
 pub mod block;
-mod build_assert;
+#[doc(hidden)]
+pub mod build_assert;
 pub mod cred;
+pub mod delay;
 pub mod device;
+pub mod device_id;
+pub mod devres;
+pub mod dma;
+pub mod driver;
 pub mod error;
 #[cfg(CONFIG_RUST_FW_LOADER_ABSTRACTIONS)]
 pub mod firmware;
 pub mod fs;
 pub mod init;
+pub mod io;
 pub mod ioctl;
 pub mod jump_label;
 #[cfg(CONFIG_KUNIT)]
 pub mod kunit;
 pub mod list;
 pub mod miscdevice;
+pub mod module_param;
 #[cfg(CONFIG_NET)]
 pub mod net;
+pub mod of;
 pub mod page;
+#[cfg(CONFIG_PCI)]
+pub mod pci;
 pub mod pid_namespace;
+pub mod platform;
 pub mod prelude;
 pub mod print;
 pub mod rbtree;
+pub mod revocable;
 pub mod security;
 pub mod seq_file;
+pub mod siphash;
 pub mod sizes;
+pub mod soc;
 mod static_assert;
 #[doc(hidden)]
 pub mod std_vendor;
@@ -68,14 +97,17 @@ pub mod transmute;
 pub mod types;
 pub mod uaccess;
 pub mod workqueue;
+pub mod xarray;
 
 #[doc(hidden)]
 pub use bindings;
 pub use macros;
 pub use uapi;
 
-#[doc(hidden)]
-pub use build_error::build_error;
+pub(crate) mod private {
+    #[allow(unreachable_pub)]
+    pub trait Sealed {}
+}
 
 /// Prefix to appear before log messages printed from within the `kernel` crate.
 const __LOG_PREFIX: &[u8] = b"rust_kernel\0";
@@ -114,6 +146,12 @@ impl<T: Module> InPlaceModule for T {
         // SAFETY: On success, `initer` always fully initialises an instance of `Self`.
         unsafe { init::pin_init_from_closure(initer) }
     }
+}
+
+/// Metadata attached to a [`Module`] or [`InPlaceModule`].
+pub trait ModuleMetadata {
+    /// The name of the module as specified in the `module!` macro.
+    const NAME: &'static crate::str::CStr;
 }
 
 /// Equivalent to `THIS_MODULE` in the C API.

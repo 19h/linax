@@ -24,6 +24,30 @@ use proc_macro::TokenStream;
 /// The `type` argument should be a type which implements the [`Module`]
 /// trait. Also accepts various forms of kernel metadata.
 ///
+/// The `params` field describe module parameters. Each entry has the form
+///
+/// ```ignore
+/// parameter_name: type {
+///     default: default_value,
+///     description: "Description",
+/// }
+/// ```
+///
+/// `type` may be one of
+///
+/// - [`i8`]
+/// - [`u8`]
+/// - [`i8`]
+/// - [`u8`]
+/// - [`i16`]
+/// - [`u16`]
+/// - [`i32`]
+/// - [`u32`]
+/// - [`i64`]
+/// - [`u64`]
+/// - [`isize`]
+/// - [`usize`]
+///
 /// C header: [`include/linux/moduleparam.h`](srctree/include/linux/moduleparam.h)
 ///
 /// [`Module`]: ../kernel/trait.Module.html
@@ -40,6 +64,12 @@ use proc_macro::TokenStream;
 ///     description: "My very own kernel module!",
 ///     license: "GPL",
 ///     alias: ["alternate_module_name"],
+///     params: {
+///         my_parameter: i64 {
+///             default: 1,
+///             description: "This parameter has a default of 1",
+///         },
+///     },
 /// }
 ///
 /// struct MyModule(i32);
@@ -48,6 +78,7 @@ use proc_macro::TokenStream;
 ///     fn init(_module: &'static ThisModule) -> Result<Self> {
 ///         let foo: i32 = 42;
 ///         pr_info!("I contain:  {}\n", foo);
+///         pr_info!("i32 param is:  {}\n", module_parameters::my_parameter.read());
 ///         Ok(Self(foo))
 ///     }
 /// }
@@ -123,12 +154,12 @@ pub fn module(ts: TokenStream) -> TokenStream {
 /// used on the Rust side, it should not be possible to call the default
 /// implementation. This is done to ensure that we call the vtable methods
 /// through the C vtable, and not through the Rust vtable. Therefore, the
-/// default implementation should call `kernel::build_error`, which prevents
+/// default implementation should call `build_error!`, which prevents
 /// calls to this function at compile time:
 ///
 /// ```compile_fail
 /// # // Intentionally missing `use`s to simplify `rusttest`.
-/// kernel::build_error(VTABLE_DEFAULT_ERROR)
+/// build_error!(VTABLE_DEFAULT_ERROR)
 /// ```
 ///
 /// Note that you might need to import [`kernel::error::VTABLE_DEFAULT_ERROR`].
@@ -145,11 +176,11 @@ pub fn module(ts: TokenStream) -> TokenStream {
 /// #[vtable]
 /// pub trait Operations: Send + Sync + Sized {
 ///     fn foo(&self) -> Result<()> {
-///         kernel::build_error(VTABLE_DEFAULT_ERROR)
+///         build_error!(VTABLE_DEFAULT_ERROR)
 ///     }
 ///
 ///     fn bar(&self) -> Result<()> {
-///         kernel::build_error(VTABLE_DEFAULT_ERROR)
+///         build_error!(VTABLE_DEFAULT_ERROR)
 ///     }
 /// }
 ///

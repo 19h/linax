@@ -98,6 +98,7 @@ config APPLE_SIO
 	tristate "Apple SIO support"
 	depends on ARCH_APPLE || COMPILE_TEST
 	depends on APPLE_RTKIT
+	depends on OF_ADDRESS
 	select DMA_ENGINE
 	default m if ARCH_APPLE
 	help

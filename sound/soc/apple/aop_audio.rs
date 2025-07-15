@@ -623,8 +623,6 @@ impl SndSocAopDriver {
                 &Self::VTABLE,
             );
         }
-        data.set_audio_power(POWER_STATE_IDLE, 0)?;
-        data.set_audio_power(POWER_STATE_OFF, 0)?;
 
         unsafe {
             (*pcm).private_data = data.clone().into_foreign() as _;

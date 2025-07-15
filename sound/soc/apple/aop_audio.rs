@@ -456,6 +456,26 @@ unsafe extern "C" fn aop_pcm_open(substream: *mut bindings::snd_pcm_substream) -
         Ok(dc) => dc,
         Err(e) => return e.to_errno(),
     };
+
+    if unsafe { (*substream).dma_buffer.dev.type_ == bindings::SNDRV_DMA_TYPE_UNKNOWN as _ } {
+        let ret = unsafe {
+            bindings::snd_pcm_set_managed_buffer(
+                substream,
+                bindings::SNDRV_DMA_TYPE_DEV_IRAM as i32,
+                (*(*dma_chan).device).dev,
+                0,
+                0,
+            )
+        };
+        if ret < 0 {
+            dev_err!(data.dev, "Unable to allocate dma buffers");
+            unsafe {
+                bindings::dma_release_channel(dma_chan);
+            }
+            return ret;
+        }
+    }
+
     let ret = unsafe {
         let mut dai_data = bindings::snd_dmaengine_dai_dma_data::default();
         bindings::snd_dmaengine_pcm_refine_runtime_hwparams(
@@ -604,23 +624,6 @@ impl SndSocAopDriver {
             );
         }
         data.set_audio_power(POWER_STATE_IDLE, 0)?;
-        let dma_chan = data.request_dma_channel()?;
-        let ret = unsafe {
-            bindings::snd_pcm_set_managed_buffer_all(
-                pcm,
-                bindings::SNDRV_DMA_TYPE_DEV_IRAM as i32,
-                (*(*dma_chan).device).dev,
-                0,
-                0,
-            )
-        };
-        if ret < 0 {
-            dev_err!(data.dev, "Unable to allocate dma buffers");
-            return Err(Error::from_errno(ret));
-        }
-        unsafe {
-            bindings::dma_release_channel(dma_chan);
-        }
         data.set_audio_power(POWER_STATE_OFF, 0)?;
 
         unsafe {

@@ -22,8 +22,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use crate::{
     debug::*,
     driver::{AsahiDevice, AsahiDriver},
-    file,
-    mmu,
+    file, mmu,
     util::*,
 };
 

@@ -48,7 +48,7 @@ static void macsmc_input_event_button(struct macsmc_input *smcin, unsigned long 
 	case BTN_TOUCHID:
 		if (smcin->wakeup_mode) {
 			if (state)
-				pm_wakeup_event(smcin->dev, 0);
+				pm_wakeup_hard_event(smcin->dev);
 		} else {
 			input_report_key(smcin->input, KEY_POWER, state);
 			input_sync(smcin->input);
@@ -81,7 +81,7 @@ static void macsmc_input_event_lid(struct macsmc_input *smcin, unsigned long eve
 	u8 lid_state = !!((event >> 8) & 0xff);
 
 	if (smcin->wakeup_mode && !lid_state)
-		pm_wakeup_event(smcin->dev, 0);
+		pm_wakeup_hard_event(smcin->dev);
 
 	input_report_switch(smcin->input, SW_LID, lid_state);
 	input_sync(smcin->input);

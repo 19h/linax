@@ -672,6 +672,12 @@
  */
 
 /**
+ * Mask of flags which must match to consider a drm_gpuva eligible for merging
+ * with a new overlaid mapping.
+ */
+#define DRM_GPUVA_UNMERGEABLE_FLAGS DRM_GPUVA_SINGLE_PAGE
+
+/**
  * get_next_vm_bo_from_list() - get the next vm_bo element
  * @__gpuvm: the &drm_gpuvm
  * @__list_name: the name of the list we're iterating on
@@ -2055,7 +2061,8 @@ EXPORT_SYMBOL_GPL(drm_gpuva_unmap);
 static int
 op_map_cb(const struct drm_gpuvm_ops *fn, void *priv,
 	  u64 addr, u64 range,
-	  struct drm_gem_object *obj, u64 offset)
+	  struct drm_gem_object *obj, u64 offset,
+	  enum drm_gpuva_flags flags)
 {
 	struct drm_gpuva_op op = {};
 
@@ -2064,6 +2071,7 @@ op_map_cb(const struct drm_gpuvm_ops *fn, void *priv,
 	op.map.va.range = range;
 	op.map.gem.obj = obj;
 	op.map.gem.offset = offset;
+	op.map.flags = flags;
 
 	return fn->sm_step_map(&op, priv);
 }
@@ -2103,7 +2111,8 @@ static int
 __drm_gpuvm_sm_map(struct drm_gpuvm *gpuvm,
 		   const struct drm_gpuvm_ops *ops, void *priv,
 		   u64 req_addr, u64 req_range,
-		   struct drm_gem_object *req_obj, u64 req_offset)
+		   struct drm_gem_object *req_obj, u64 req_offset,
+		   enum drm_gpuva_flags req_flags)
 {
 	struct drm_gpuva *va, *next;
 	u64 req_end = req_addr + req_range;
@@ -2119,6 +2128,9 @@ __drm_gpuvm_sm_map(struct drm_gpuvm *gpuvm,
 		u64 range = va->va.range;
 		u64 end = addr + range;
 		bool merge = !!va->gem.obj;
+		bool single_page = va->flags & DRM_GPUVA_SINGLE_PAGE;
+
+		merge &= !((va->flags ^ req_flags) & DRM_GPUVA_UNMERGEABLE_FLAGS);
 
 		if (addr == req_addr) {
 			merge &= obj == req_obj &&
@@ -2143,7 +2155,9 @@ __drm_gpuvm_sm_map(struct drm_gpuvm *gpuvm,
 					.va.addr = req_end,
 					.va.range = range - req_range,
 					.gem.obj = obj,
-					.gem.offset = offset + req_range,
+					.gem.offset = offset +
+						(single_page ? 0 : req_range),
+					.flags = va->flags,
 				};
 				struct drm_gpuva_op_unmap u = {
 					.va = va,
@@ -2162,11 +2176,16 @@ __drm_gpuvm_sm_map(struct drm_gpuvm *gpuvm,
 				.va.range = ls_range,
 				.gem.obj = obj,
 				.gem.offset = offset,
+				.flags = va->flags,
 			};
 			struct drm_gpuva_op_unmap u = { .va = va };
 
-			merge &= obj == req_obj &&
-				 offset + ls_range == req_offset;
+			merge &= obj == req_obj;
+			if (single_page)
+				merge &= offset == req_offset;
+			else
+				merge &= offset + ls_range == req_offset;
+
 			u.keep = merge;
 
 			if (end == req_end) {
@@ -2188,8 +2207,10 @@ __drm_gpuvm_sm_map(struct drm_gpuvm *gpuvm,
 					.va.addr = req_end,
 					.va.range = end - req_end,
 					.gem.obj = obj,
-					.gem.offset = offset + ls_range +
-						      req_range,
+					.gem.offset = offset +
+						(single_page ? 0 :
+						 ls_range + req_range),
+					.flags = va->flags,
 				};
 
 				ret = op_remap_cb(ops, priv, &p, &n, &u);
@@ -2198,9 +2219,13 @@ __drm_gpuvm_sm_map(struct drm_gpuvm *gpuvm,
 				break;
 			}
 		} else if (addr > req_addr) {
-			merge &= obj == req_obj &&
-				 offset == req_offset +
-					   (addr - req_addr);
+			merge &= obj == req_obj;
+
+			if (single_page)
+				merge &= offset == req_offset;
+			else
+				merge &= offset == req_offset +
+					 (addr - req_addr);
 
 			if (end == req_end) {
 				ret = op_unmap_cb(ops, priv, va, merge);
@@ -2221,7 +2246,10 @@ __drm_gpuvm_sm_map(struct drm_gpuvm *gpuvm,
 					.va.addr = req_end,
 					.va.range = end - req_end,
 					.gem.obj = obj,
-					.gem.offset = offset + req_end - addr,
+					.gem.offset = offset +
+						(single_page ? 0 :
+						 req_end - addr),
+					.flags = va->flags,
 				};
 				struct drm_gpuva_op_unmap u = {
 					.va = va,
@@ -2238,7 +2266,8 @@ __drm_gpuvm_sm_map(struct drm_gpuvm *gpuvm,
 
 	return op_map_cb(ops, priv,
 			 req_addr, req_range,
-			 req_obj, req_offset);
+			 req_obj, req_offset,
+			 req_flags);
 }
 
 static int
@@ -2261,12 +2290,14 @@ __drm_gpuvm_sm_unmap(struct drm_gpuvm *gpuvm,
 		u64 addr = va->va.addr;
 		u64 range = va->va.range;
 		u64 end = addr + range;
+		bool single_page = va->flags & DRM_GPUVA_SINGLE_PAGE;
 
 		if (addr < req_addr) {
 			prev.va.addr = addr;
 			prev.va.range = req_addr - addr;
 			prev.gem.obj = obj;
 			prev.gem.offset = offset;
+			prev.flags = va->flags;
 
 			prev_split = true;
 		}
@@ -2275,7 +2306,10 @@ __drm_gpuvm_sm_unmap(struct drm_gpuvm *gpuvm,
 			next.va.addr = req_end;
 			next.va.range = end - req_end;
 			next.gem.obj = obj;
-			next.gem.offset = offset + (req_end - addr);
+			next.gem.offset = offset;
+			if (!single_page)
+				next.gem.offset += req_end - addr;
+			next.flags = va->flags;
 
 			next_split = true;
 		}
@@ -2334,7 +2368,8 @@ __drm_gpuvm_sm_unmap(struct drm_gpuvm *gpuvm,
 int
 drm_gpuvm_sm_map(struct drm_gpuvm *gpuvm, void *priv,
 		 u64 req_addr, u64 req_range,
-		 struct drm_gem_object *req_obj, u64 req_offset)
+		 struct drm_gem_object *req_obj, u64 req_offset,
+		 enum drm_gpuva_flags req_flags)
 {
 	const struct drm_gpuvm_ops *ops = gpuvm->ops;
 
@@ -2345,7 +2380,8 @@ drm_gpuvm_sm_map(struct drm_gpuvm *gpuvm, void *priv,
 
 	return __drm_gpuvm_sm_map(gpuvm, ops, priv,
 				  req_addr, req_range,
-				  req_obj, req_offset);
+				  req_obj, req_offset,
+				  req_flags);
 }
 EXPORT_SYMBOL_GPL(drm_gpuvm_sm_map);
 
@@ -2425,6 +2461,7 @@ static const struct drm_gpuvm_ops lock_ops = {
  * @req_range: the range of the mappings to unmap
  * @req_obj: the &drm_gem_object to map
  * @req_offset: the offset within the &drm_gem_object
+ * @req_flags: drm_gpuva flags
  *
  * This function locks (drm_exec_lock_obj()) objects that will be unmapped/
  * remapped, and locks+prepares (drm_exec_prepare_object()) objects that
@@ -2479,7 +2516,8 @@ int
 drm_gpuvm_sm_map_exec_lock(struct drm_gpuvm *gpuvm,
 			   struct drm_exec *exec, unsigned int num_fences,
 			   u64 req_addr, u64 req_range,
-			   struct drm_gem_object *req_obj, u64 req_offset)
+			   struct drm_gem_object *req_obj, u64 req_offset,
+			   enum drm_gpuva_flags req_flags)
 {
 	if (req_obj) {
 		int ret = drm_exec_prepare_obj(exec, req_obj, num_fences);
@@ -2489,7 +2527,8 @@ drm_gpuvm_sm_map_exec_lock(struct drm_gpuvm *gpuvm,
 
 	return __drm_gpuvm_sm_map(gpuvm, &lock_ops, exec,
 				  req_addr, req_range,
-				  req_obj, req_offset);
+				  req_obj, req_offset,
+				  req_flags);
 
 }
 EXPORT_SYMBOL_GPL(drm_gpuvm_sm_map_exec_lock);
@@ -2643,7 +2682,8 @@ static const struct drm_gpuvm_ops gpuvm_list_ops = {
 struct drm_gpuva_ops *
 drm_gpuvm_sm_map_ops_create(struct drm_gpuvm *gpuvm,
 			    u64 req_addr, u64 req_range,
-			    struct drm_gem_object *req_obj, u64 req_offset)
+			    struct drm_gem_object *req_obj, u64 req_offset,
+			    enum drm_gpuva_flags req_flags)
 {
 	struct drm_gpuva_ops *ops;
 	struct {
@@ -2663,7 +2703,8 @@ drm_gpuvm_sm_map_ops_create(struct drm_gpuvm *gpuvm,
 
 	ret = __drm_gpuvm_sm_map(gpuvm, &gpuvm_list_ops, &args,
 				 req_addr, req_range,
-				 req_obj, req_offset);
+				 req_obj, req_offset,
+				 req_flags);
 	if (ret)
 		goto err_free_ops;
 
@@ -2790,6 +2831,49 @@ err_free_ops:
 	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL_GPL(drm_gpuvm_prefetch_ops_create);
+
+/**
+ * drm_gpuvm_bo_unmap() - unmaps a GEM
+ * @vm_bo: the &drm_gpuvm_bo abstraction
+ *
+ * This function calls the unmap callback for every GPUVA attached to a GEM.
+ *
+ * It is the callers responsibility to protect the GEMs GPUVA list against
+ * concurrent access using the GEMs dma_resv lock.
+ *
+ * Returns: a pointer to the &drm_gpuva_ops on success, an ERR_PTR on failure
+ */
+int
+drm_gpuvm_bo_unmap(struct drm_gpuvm_bo *vm_bo, void *priv)
+{
+	struct drm_gpuva_op *op;
+	int ret;
+
+	if (unlikely(!vm_bo->vm))
+		return -EINVAL;
+
+	const struct drm_gpuvm_ops *vm_ops = vm_bo->vm->ops;
+
+	if (unlikely(!(vm_ops && vm_ops->sm_step_unmap)))
+		return -EINVAL;
+
+	struct drm_gpuva_ops *ops = drm_gpuvm_bo_unmap_ops_create(vm_bo);
+        if (IS_ERR(ops))
+                return PTR_ERR(ops);
+
+	drm_gpuva_for_each_op(op, ops) {
+		drm_WARN_ON(vm_bo->vm->drm, op->op != DRM_GPUVA_OP_UNMAP);
+
+		ret = op_unmap_cb(vm_ops, priv, op->unmap.va, false);
+		if (ret)
+			goto cleanup;
+	}
+
+cleanup:
+	drm_gpuva_ops_free(vm_bo->vm, ops);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(drm_gpuvm_bo_unmap);
 
 /**
  * drm_gpuvm_bo_unmap_ops_create() - creates the &drm_gpuva_ops to unmap a GEM
